@@ -39,6 +39,13 @@ class PGVector extends VectorDatabase {
   getEmbeddingTableSchemaSql =
     "SELECT column_name,data_type FROM information_schema.columns WHERE table_name = $1";
   createExtensionSql = "CREATE EXTENSION IF NOT EXISTS vector;";
+  createFloat4FunctionSql = `
+    CREATE OR REPLACE FUNCTION vector_to_float4(v vector) RETURNS float4[] AS $$
+      BEGIN
+        RETURN v::float4[];
+      END;
+    $$ LANGUAGE plpgsql IMMUTABLE;
+  `;
 
   /**
    * Get the table name for the PGVector database.
@@ -387,6 +394,12 @@ class PGVector extends VectorDatabase {
     };
 
     const embedding = `[${queryVector.map(Number).join(",")}]`;
+    try {
+      await client.query(this.createFloat4FunctionSql);
+    } catch (e) {
+      this.logger("Could not create vector_to_float4 function, it might already exist or not be needed.", e.message);
+    }
+
     const response = await client.query(
       `SELECT embedding ${this.operator.cosine} $1 AS _distance, metadata FROM "${PGVector.tableName()}" WHERE namespace = $2 ORDER BY _distance ASC LIMIT $3`,
       [embedding, namespace, topN]
@@ -470,6 +483,11 @@ class PGVector extends VectorDatabase {
   async createTableIfNotExists(connection, dimensions = 384) {
     this.logger(`Creating embedding table with ${dimensions} dimensions`);
     await connection.query(this.createExtensionSql);
+    try {
+      await connection.query(this.createFloat4FunctionSql);
+    } catch (e) {
+      this.logger("Could not create vector_to_float4 function, it might already exist or not be needed.", e.message);
+    }
     await connection.query(this.createTableSql(dimensions));
     return true;
   }
