@@ -2,7 +2,7 @@ name: anythingllm
 
 networks:
   anything-llm:
-    driver: bridge
+    driver: host
 
 services:
   anything-llm:
