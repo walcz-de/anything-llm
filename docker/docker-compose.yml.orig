@@ -29,3 +29,5 @@ services:
       - anything-llm
     extra_hosts:
       - "host.docker.internal:host-gateway"
+      - "mcp-gateway:host-gateway"
+      - "localhost:host-gateway"

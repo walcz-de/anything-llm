@@ -1,0 +1,59 @@
+name: wlcz.io
+displayName: wlcz.io
+registry:
+  google-workspace: null
+  apple-mcp:
+    description: Apple MCP Server
+    title: Apple MCP
+    type: server
+    command:
+      - bunx
+    args:
+      - --no-cache
+      - apple-mcp@latest
+  omnifocus:
+    description: OmniFocus MCP Server
+    title: OmniFocus
+    type: server
+    command:
+      - npx
+    args:
+      - -y
+      - omnifocus-mcp
+  stirling-pdf:
+    description: Stirling PDF MCP Server
+    title: Stirling PDF
+    type: server
+    command:
+      - node
+    args:
+      - /Users/stefanwalcz/Repo/stirling-pdf-mcp/dist/index.js
+    env:
+      - name: STIRLING_PDF_URL
+        value: http://host.docker.internal:8080
+      - name: STIRLING_PDF_API_KEY
+        value: a4e0ec0e-0bc0-4aff-b993-fea991ddec55
+  qrcode:
+    description: QR Code MCP Server
+    title: QR Code
+    type: server
+    command:
+      - /Users/stefanwalcz/mcp/qrcode-mcp-server/venv/bin/python3
+    args:
+      - /Users/stefanwalcz/mcp/qrcode-mcp-server/src/server.py
+  ghost:
+    description: Ghost MCP Server
+    title: Ghost
+    type: server
+    command:
+      - npx
+    args:
+      - -y
+      - '@ryukimin/ghost-mcp'
+    env:
+      - name: GHOST_URL
+        value: https://admin.walcz.de
+      - name: GHOST_CONTENT_API_KEY
+        value: f666dc2c08bafbb19d7237abb2
+      - name: GHOST_ADMIN_API_KEY
+        value: 6995a50b0e2f2400015e0487:c263d12f5364d88e1e163839ed8fe7a842e738a6350aec230ae677ba72ea95ac

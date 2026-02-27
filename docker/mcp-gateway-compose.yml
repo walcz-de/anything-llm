@@ -1,0 +1,23 @@
+name: mcp-infrastructure
+
+networks:
+  anything-llm:
+    external: true
+    name: anythingllm_anything-llm
+
+services:
+  mcp-gateway:
+    image: mintplexlabs/mcp-gateway:latest
+    container_name: mcp-gateway
+    command: run --transport sse --port 3005
+    environment:
+      - MCP_GATEWAY_TRANSPORT=sse
+      - MCP_GATEWAY_BASE_URL=http://localhost:3005
+    ports:
+      - "3005:3005"
+    networks:
+      - anything-llm
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /Users/stefanwalcz/.docker/mcp:/root/.docker/mcp:ro
+      - /Users/stefanwalcz:/Users/stefanwalcz:ro
