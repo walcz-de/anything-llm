@@ -1,5 +1,9 @@
 name: anythingllm
 
+networks:
+  anything-llm:
+    driver: bridge
+
 services:
   anything-llm:
     container_name: anythingllm
@@ -17,8 +21,11 @@ services:
       - "../collector/hotdir/:/app/collector/hotdir"
       - "../collector/outputs/:/app/collector/outputs"
     user: "${UID:-1000}:${GID:-1000}"
+    ports:
+      - "3001:3001"
     env_file:
       - .env
-    network_mode: host
+    networks:
+      - anything-llm
     extra_hosts:
       - "host.docker.internal:host-gateway"
