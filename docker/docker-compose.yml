@@ -27,7 +27,7 @@ services:
       - .env
     networks:
       - anything-llm
-    entrypoint: /bin/bash -c "node -e \"const net = require('net'); net.createServer((c) => { const r = net.connect(3000, 'host.docker.internal', () => { c.pipe(r); r.pipe(c); }); c.on('error', (e) => { r.destroy(); }); r.on('error', (e) => { c.destroy(); }); }).listen(3000, '0.0.0.0');\" & exec /usr/local/bin/docker-entrypoint.sh"
     extra_hosts:
       - "host.docker.internal:host-gateway"
+      - "mcp-gateway:host-gateway"
       - "localhost:host-gateway"
