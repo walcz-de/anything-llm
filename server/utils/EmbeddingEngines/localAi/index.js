@@ -25,6 +25,7 @@ class LocalAiEmbedder {
           ? ` - Output Dimensions: ${this.outputDimensions}`
           : " Assuming default output dimensions")
     );
+    this.log(`TRACE: LocalAiEmbedder constructor. model=${this.model}, outputDimensions=${this.outputDimensions}, process.env.EMBEDDING_OUTPUT_DIMENSIONS=${process.env.EMBEDDING_OUTPUT_DIMENSIONS}`);
   }
 
   log(text, ...args) {
@@ -49,27 +50,49 @@ class LocalAiEmbedder {
   }
 
   async embedChunks(textChunks = []) {
+    this.log(`TRACE: LocalAiEmbedder.embedChunks start. Chunks count: ${textChunks.length}, outputDimensions=${this.outputDimensions}`);
     const embeddingRequests = [];
     for (const chunk of toChunks(textChunks, this.maxConcurrentChunks)) {
       embeddingRequests.push(
-        new Promise((resolve) => {
-          this.openai.embeddings
-            .create({
+        new Promise(async (resolve) => {
+          try {
+            const body = {
               model: this.model,
               input: chunk,
-              dimensions: this.outputDimensions,
-            })
-            .then((result) => {
-              resolve({ data: result?.data, error: null });
-            })
-            .catch((e) => {
-              e.type =
-                e?.response?.data?.error?.code ||
-                e?.response?.status ||
-                "failed_to_embed";
-              e.message = e?.response?.data?.error?.message || e.message;
-              resolve({ data: [], error: e });
+            };
+
+            if (this.outputDimensions) {
+              body.dimensions = this.outputDimensions;
+            }
+
+            this.log(`TRACE: Sending fetch to ${this.openai.baseURL}/embeddings`.replace(/\/+$/, "").replace(/\/embeddings\/embeddings$/, "/embeddings"));
+            const response = await fetch(`${this.openai.baseURL}/embeddings`.replace(/\/+$/, "").replace(/\/embeddings\/embeddings$/, "/embeddings"), {
+              method: "POST",
+              headers: {
+                "Accept": "application/json",
+                "Content-Type": "application/json",
+                ...(this.openai.apiKey
+                  ? { Authorization: `Bearer ${this.openai.apiKey}` }
+                  : {}),
+              },
+              body: JSON.stringify(body),
             });
+
+            if (!response.ok) {
+              const errorData = await response.json().catch(() => ({}));
+              throw new Error(errorData.error?.message || `HTTP error! status: ${response.status}`);
+            }
+
+            const result = await response.json();
+            if (result?.data?.[0]?.embedding) {
+              this.log(`TRACE: LocalAiEmbedder chunk result dimension: ${result.data[0].embedding.length}`);
+            }
+            resolve({ data: result?.data, error: null });
+          } catch (e) {
+            this.log(`TRACE: LocalAiEmbedder error: ${e.message}`);
+            e.type = "failed_to_embed";
+            resolve({ data: [], error: e });
+          }
         })
       );
     }

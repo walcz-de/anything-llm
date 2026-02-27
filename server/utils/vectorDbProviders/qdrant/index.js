@@ -164,63 +164,85 @@ class QDrant extends VectorDatabase {
       const { pageContent, docId, ...metadata } = documentData;
       if (!pageContent || pageContent.length == 0) return false;
 
-      this.logger("Adding new vectorized document into namespace", namespace);
+      this.logger("TRACE: addDocumentToNamespace starting for namespace", namespace);
+      const EmbedderEngine = getEmbeddingEngineSelection();
+      this.logger(`TRACE: EmbedderEngine class=${EmbedderEngine.className}, model=${EmbedderEngine.model}, outputDimensions=${EmbedderEngine.outputDimensions}`);
+
+      // If outputDimensions is explicitly set in the engine/env, use it as the source of truth.
+      if (!!EmbedderEngine.outputDimensions) {
+        vectorDimension = EmbedderEngine.outputDimensions;
+        this.logger(`TRACE: Using engine outputDimensions as source of truth: ${vectorDimension}`);
+      }
+
       if (!skipCache) {
         const cacheResult = await cachedVectorInformation(fullFilePath);
         if (cacheResult.exists) {
-          const { client } = await this.connect();
           const { chunks } = cacheResult;
           const documentVectors = [];
           vectorDimension =
             chunks[0][0]?.vector?.length ??
             chunks[0][0]?.values?.length ??
             null;
+          this.logger(`TRACE: Cache found. vectorDimension=${vectorDimension}`);
 
-          const collection = await this.getOrCreateCollection(
-            client,
-            namespace,
-            vectorDimension
-          );
-          if (!collection)
-            throw new Error("Failed to create new QDrant collection!", {
+          // If the cache dimension does not match the configured engine's output dimension,
+          // we should ignore the cache and re-embed the document.
+          if (
+            !!EmbedderEngine.outputDimensions &&
+            !!vectorDimension &&
+            EmbedderEngine.outputDimensions !== vectorDimension
+          ) {
+            this.logger(
+              `Cache dimension mismatch (${vectorDimension} vs ${EmbedderEngine.outputDimensions}). Ignoring cache.`
+            );
+          } else {
+            const { client } = await this.connect();
+            const collection = await this.getOrCreateCollection(
+              client,
               namespace,
-            });
+              vectorDimension
+            );
+            if (!collection)
+              throw new Error("Failed to create new QDrant collection!", {
+                namespace,
+              });
 
-          for (const chunk of chunks) {
-            const submission = {
-              ids: [],
-              vectors: [],
-              payloads: [],
-            };
+            for (const chunk of chunks) {
+              const submission = {
+                ids: [],
+                vectors: [],
+                payloads: [],
+              };
 
-            // Before sending to Qdrant and saving the records to our db
-            // we need to assign the id of each chunk that is stored in the cached file.
-            // The id property must be defined or else it will be unable to be managed by ALLM.
-            chunk.forEach((chunk) => {
-              const id = uuidv4();
-              if (chunk?.payload?.hasOwnProperty("id")) {
-                const { id: _id, ...payload } = chunk.payload;
-                documentVectors.push({ docId, vectorId: id });
-                submission.ids.push(id);
-                submission.vectors.push(chunk.vector);
-                submission.payloads.push(payload);
-              } else {
-                console.error(
-                  "The 'id' property is not defined in chunk.payload - it will be omitted from being inserted in QDrant collection."
-                );
-              }
-            });
+              // Before sending to Qdrant and saving the records to our db
+              // we need to assign the id of each chunk that is stored in the cached file.
+              // The id property must be defined or else it will be unable to be managed by ALLM.
+              chunk.forEach((chunk) => {
+                const id = uuidv4();
+                if (chunk?.payload?.hasOwnProperty("id")) {
+                  const { id: _id, ...payload } = chunk.payload;
+                  documentVectors.push({ docId, vectorId: id });
+                  submission.ids.push(id);
+                  submission.vectors.push(chunk.vector);
+                  submission.payloads.push(payload);
+                } else {
+                  console.error(
+                    "The 'id' property is not defined in chunk.payload - it will be omitted from being inserted in QDrant collection."
+                  );
+                }
+              });
 
-            const additionResult = await client.upsert(namespace, {
-              wait: true,
-              batch: { ...submission },
-            });
-            if (additionResult?.status !== "completed")
-              throw new Error("Error embedding into QDrant", additionResult);
+              const additionResult = await client.upsert(namespace, {
+                wait: true,
+                batch: { ...submission },
+              });
+              if (additionResult?.status !== "completed")
+                throw new Error("Error embedding into QDrant", additionResult);
+            }
+
+            await DocumentVectors.bulkInsert(documentVectors);
+            return { vectorized: true, error: null };
           }
-
-          await DocumentVectors.bulkInsert(documentVectors);
-          return { vectorized: true, error: null };
         }
       }
 
@@ -228,7 +250,6 @@ class QDrant extends VectorDatabase {
       // We have to do this manually as opposed to using LangChains `Qdrant.fromDocuments`
       // because we then cannot atomically control our namespace to granularly find/remove documents
       // from vectordb.
-      const EmbedderEngine = getEmbeddingEngineSelection();
       const textSplitter = new TextSplitter({
         chunkSize: TextSplitter.determineMaxChunkSize(
           await SystemSettings.getValueOrFallback({
@@ -249,6 +270,7 @@ class QDrant extends VectorDatabase {
       const documentVectors = [];
       const vectors = [];
       const vectorValues = await EmbedderEngine.embedChunks(textChunks);
+      this.logger(`TRACE: embedChunks returned ${vectorValues?.length} vectors.`);
       const submission = {
         ids: [],
         vectors: [],
@@ -257,7 +279,23 @@ class QDrant extends VectorDatabase {
 
       if (!!vectorValues && vectorValues.length > 0) {
         for (const [i, vector] of vectorValues.entries()) {
-          if (!vectorDimension) vectorDimension = vector.length;
+          if (!vectorDimension) {
+            vectorDimension = vector.length;
+            this.logger(`TRACE: First vector length measured as ${vectorDimension}`);
+          }
+
+          if (
+            !!EmbedderEngine.outputDimensions &&
+            vector.length !== EmbedderEngine.outputDimensions
+          ) {
+            this.logger(
+              `ERROR: Dimension mismatch! Engine expected ${EmbedderEngine.outputDimensions}, but model returned ${vector.length}.`
+            );
+            throw new Error(
+              `Embedding engine returned vectors with dimension ${vector.length}, but configuration expected ${EmbedderEngine.outputDimensions}.`
+            );
+          }
+
           const vectorRecord = {
             id: uuidv4(),
             vector: vector,
@@ -281,6 +319,7 @@ class QDrant extends VectorDatabase {
       }
 
       const { client } = await this.connect();
+      this.logger(`TRACE: calling getOrCreateCollection with dimension=${vectorDimension}`);
       const collection = await this.getOrCreateCollection(
         client,
         namespace,
